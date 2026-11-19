@@ -1,0 +1,6 @@
+target/
+build/
+.gradle/
+local.properties
+node_modules/
+windows/src-tauri/gen/

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Share</title>
+<style>
+:root{--bg:#eceff3;--panel:#fff;--ink:#18222c;--mute:#667380;--line:#d4dae1;--acc:#1d5fd6;--on:#fff;--sel:#e2ecfb;--bad:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1419;--panel:#171f27;--ink:#e5eaef;--mute:#8996a3;--line:#29343e;--acc:#5b98f5;--on:#08111f;--sel:#1e3350;--bad:#f2867f}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
+.sub{display:flex;gap:14px;color:var(--mute);font-size:13px}
+.conn{display:flex;gap:6px;flex-wrap:wrap}
+input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+#ip{width:150px}#pin{width:90px}
+button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+button.primary,.chip.on{background:var(--acc);color:var(--on);border-color:var(--acc)}
+.peers{display:flex;gap:6px;flex-wrap:wrap}
+#status{padding:6px 14px;font-size:13px;color:var(--mute);min-height:30px}#status.err{color:var(--bad)}
+main{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 10px 10px}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-height:0}
+.ph{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+.path{color:var(--mute);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.list{flex:1;overflow:auto}
+.row{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:has(input:checked){background:var(--sel)}
+.row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row .sz{color:var(--mute);font-size:12px}
+.dir .nm{font-weight:600}.empty{padding:18px 12px;color:var(--mute)}
+#prog{margin:0 14px 6px;height:8px;border-radius:4px;background:var(--line);overflow:hidden}#bar{height:100%;width:0;background:var(--acc);transition:width .2s}
+@media(max-width:720px){main{grid-template-columns:1fr;grid-auto-rows:minmax(0,1fr)}}
+</style></head><body>
+<header>
+ <div><b id="me">This device</b><div class="sub"><span id="addr"></span><span id="pinv"></span></div></div>
+ <div class="conn"><input id="ip" placeholder="Other device IP" inputmode="decimal"><input id="pin" placeholder="PIN" inputmode="numeric" maxlength="6"><button id="go" class="primary">Connect</button></div>
+ <div id="peers" class="peers"></div>
+</header>
+<div id="status"></div>
+<div id="prog" hidden><div id="bar"></div></div>
+<main>
+ <section class="pane"><div class="ph"><b>This device</b><span id="Lpath" class="path"></span></div>
+  <div class="bar"><button id="Lup">Up</button><button id="send" class="primary">Send to other device</button></div><div id="Llist" class="list"></div></section>
+ <section class="pane"><div class="ph"><b id="Rtitle">Other device</b><span id="Rpath" class="path"></span></div>
+  <div class="bar"><button id="Rup">Up</button><button id="get" class="primary">Download to this device</button></div><div id="Rlist" class="list"></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s),st={peers:[],peer:null,lp:'',rp:''};
+const h=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+async function j(url,body){const r=await fetch(url,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{});const t=await r.text();if(!r.ok)throw new Error(t||'HTTP '+r.status);try{return JSON.parse(t)}catch(e){return t}}
+const join=(p,n)=>p?p+'/'+n:n,up=p=>p.split('/').slice(0,-1).join('/');
+const size=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(2)+' GB';
+function say(m,err){const s=$('#status');s.textContent=m;s.className=err?'err':''}
+function draw(list,data,path,open){list.replaceChildren();
+ if(!data.entries.length)list.append(h('div','empty','This folder is empty.'));
+ for(const e of data.entries){const row=h('label','row'+(e.dir?' dir':''));
+  const cb=document.createElement('input');cb.type='checkbox';cb.dataset.name=e.name;cb.dataset.dir=e.dir?'1':'0';cb.dataset.size=e.size;row.append(cb);
+  if(e.dir)row.append(h('span','','📁'));
+  const nm=h('span','nm',e.name);if(e.dir)nm.onclick=ev=>{ev.preventDefault();open(join(path,e.name))};
+  row.append(nm);if(!e.dir)row.append(h('span','sz',size(e.size)));list.append(row)}}
+async function loadL(){try{const d=await j('/ui/list?path='+encodeURIComponent(st.lp));$('#Lpath').textContent='/'+st.lp;draw($('#Llist'),d,st.lp,p=>{st.lp=p;loadL()})}catch(e){say(e.message,1)}}
+async function loadR(){const l=$('#Rlist');
+ if(!st.peer){l.replaceChildren(h('div','empty',"Enter the other device's IP and PIN, then press Connect."));$('#Rtitle').textContent='Other device';$('#Rpath').textContent='';return}
+ const p=st.peers.find(x=>x.id===st.peer);$('#Rtitle').textContent=p?p.name:'Other device';
+ try{const d=await j('/ui/rlist?peer='+encodeURIComponent(st.peer)+'&path='+encodeURIComponent(st.rp));$('#Rpath').textContent='/'+st.rp;draw(l,d,st.rp,q=>{st.rp=q;loadR()})}
+ catch(e){l.replaceChildren(h('div','empty',e.message));say(e.message,1)}}
+function chips(){const box=$('#peers');box.replaceChildren();for(const p of st.peers){const b=h('button','chip'+(p.id===st.peer?' on':''),p.name);b.onclick=()=>{st.peer=p.id;st.rp='';chips();loadR()};box.append(b)}}
+let last='';
+async function poll(){try{const s=await j('/ui/state');$('#me').textContent=s.name;$('#addr').textContent='IP '+s.ip+':'+s.port;$('#pinv').textContent='PIN '+s.pin;
+ const k=JSON.stringify(s.peers);if(k!==last){last=k;st.peers=s.peers;if(!s.peers.find(p=>p.id===st.peer)){st.peer=s.peers.length?s.peers[0].id:null;st.rp='';loadR()}chips()}}catch(e){}}
+$('#go').onclick=async()=>{try{say('Connecting…');const p=await j('/ui/connect',{ip:$('#ip').value.trim(),pin:$('#pin').value.trim()});say('Connected to '+p.name);st.peer=p.id;st.rp='';await poll();chips();loadR()}catch(e){say(e.message,1)}};
+$('#Lup').onclick=()=>{st.lp=up(st.lp);loadL()};$('#Rup').onclick=()=>{st.rp=up(st.rp);loadR()};
+let busy=false;const enc=encodeURIComponent;
+async function walk(push,src,dst,it,out){
+ if(!it.dir){out.files.push({from:join(src,it.name),to:dst,size:it.size,name:it.name});return}
+ const here=join(src,it.name),there=join(dst,it.name);out.dirs.push(there);
+ const d=push?await j('/ui/list?path='+enc(here)):await j('/ui/rlist?peer='+enc(st.peer)+'&path='+enc(here));
+ for(const e of d.entries)await walk(push,here,there,e,out)}
+function show(bytes,total,files,i,name,push){
+ const pct=total?Math.min(100,bytes/total*100):(files?100*i/files:0);
+ $('#bar').style.width=pct+'%';
+ say((push?'Sending ':'Downloading ')+name+' (file '+(i+1)+' of '+files+'): '+size(bytes)+' of '+size(total)+', '+Math.floor(pct)+'%')}
+async function transfer(push){
+ if(busy)return;
+ if(!st.peer)return say('Connect to a device first.',1);
+ const items=[...document.querySelectorAll(push?'#Llist input:checked':'#Rlist input:checked')].map(i=>({name:i.dataset.name,dir:i.dataset.dir==='1',size:+i.dataset.size}));
+ if(!items.length)return say('Tick the files or folders to '+(push?'send':'download')+' first.',1);
+ busy=true;let timer;
+ try{
+  say('Reading folders…');
+  const out={files:[],dirs:[]};
+  for(const it of items)await walk(push,push?st.lp:st.rp,push?st.rp:st.lp,it,out);
+  for(const d of out.dirs)await(push?j('/ui/rmkdir',{peer:st.peer,path:d}):j('/ui/mkdir',{path:d}));
+  const total=out.files.reduce((a,f)=>a+f.size,0);let base=0,i=0;
+  $('#bar').style.width='0%';$('#prog').hidden=false;
+  timer=setInterval(async()=>{try{const p=await j('/ui/progress');const f=out.files[i];if(f)show(base+Math.min(p.done,f.size||p.done),total,out.files.length,i,f.name,push)}catch(e){}},250);
+  for(;i<out.files.length;i++){const f=out.files[i];
+   show(base,total,out.files.length,i,f.name,push);
+   try{if(push)await j('/ui/push',{peer:st.peer,localPath:f.from,remoteDir:f.to});else await j('/ui/pull',{peer:st.peer,remotePath:f.from,localDir:f.to})}
+   catch(e){say(f.name+': '+e.message,1);return}
+   base+=f.size}
+  $('#bar').style.width='100%';
+  say((push?'Sent ':'Downloaded ')+out.files.length+(out.files.length==1?' file':' files')+' ('+size(total)+').')
+ }catch(e){say(e.message,1)}
+ finally{clearInterval(timer);busy=false;setTimeout(()=>{if(!busy)$('#prog').hidden=true},1500);push?loadR():loadL()}}
+$('#send').onclick=()=>transfer(true);$('#get').onclick=()=>transfer(false);
+poll();loadL();loadR();setInterval(poll,3000);
+</script></body></html>
